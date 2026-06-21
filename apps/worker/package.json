@@ -1,1 +1,21 @@
-{} 
+{
+  "name": "@jobqueue/worker",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@jobqueue/shared": "*",
+    "bullmq": "^5.7.0",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.5"
+  }
+}
