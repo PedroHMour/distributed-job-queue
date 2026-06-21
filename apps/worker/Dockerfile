@@ -68,8 +68,8 @@ USER nodeapp
 
 # Stalled job detection: se o container morrer sem graceful shutdown, o BullMQ
 # detecta jobs travados em ACTIVE após stalledInterval (configurado no worker)
-HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 \
-  CMD pgrep -f "node apps/worker/dist/index.js" || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "var fs=require('fs');var t=parseInt(fs.readFileSync('/tmp/worker-alive','utf8'));process.exit(Date.now()-t<60000?0:1)"
 
 # Sem migration — apenas o processo worker
 CMD ["node", "apps/worker/dist/apps/worker/src/index.js"]
