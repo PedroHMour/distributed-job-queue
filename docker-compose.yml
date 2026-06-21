@@ -6,9 +6,9 @@ services:
     container_name: jobqueue_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-jobqueue}
+      POSTGRES_USER:     ${POSTGRES_USER:-jobqueue}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobqueue_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-jobqueue_db}
+      POSTGRES_DB:       ${POSTGRES_DB:-jobqueue_db}
     ports:
       - "5432:5432"
     volumes:
@@ -31,7 +31,7 @@ services:
       --save 60 1
       --loglevel warning
       --maxmemory 256mb
-      --maxmemory-policy noeviction
+      --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -45,8 +45,56 @@ services:
     networks:
       - jobqueue_network
 
-  # api e worker serão adicionados na Etapa 4
-  # com build: context e depends_on dos healthchecks acima
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: jobqueue_api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      NODE_ENV:     production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-jobqueue}:${POSTGRES_PASSWORD:-jobqueue_secret}@postgres:5432/${POSTGRES_DB:-jobqueue_db}?schema=public"
+      REDIS_HOST:   redis
+      REDIS_PORT:   "6379"
+      API_PORT:     "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "var h=require('http');h.get('http://localhost:3000/health',function(r){process.exit(r.statusCode===200?0:1)}).on('error',function(){process.exit(1)})"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - jobqueue_network
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV:     production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-jobqueue}:${POSTGRES_PASSWORD:-jobqueue_secret}@postgres:5432/${POSTGRES_DB:-jobqueue_db}?schema=public"
+      REDIS_HOST:   redis
+      REDIS_PORT:   "6379"
+      CONCURRENCY_EMAIL:  ${CONCURRENCY_EMAIL:-10}
+      CONCURRENCY_IMAGE:  ${CONCURRENCY_IMAGE:-2}
+      CONCURRENCY_REPORT: ${CONCURRENCY_REPORT:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - jobqueue_network
 
 volumes:
   postgres_data:
