@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enum espelhando os tipos de job que processaremos
+enum JobType {
+  EMAIL_DELIVERY
+  IMAGE_PROCESSING
+  REPORT_GENERATION
+}
+
+// Enum completo do ciclo de vida de um job
+enum JobStatus {
+  PENDING     // Inserido na fila, aguardando worker
+  ACTIVE      // Worker pegou, está processando
+  COMPLETED   // Processado com sucesso
+  FAILED      // Falhou em todas as tentativas
+  RETRYING    // Falhou mas ainda tem tentativas restantes
+  DEAD        // Movido para a Dead Letter Queue
+}
+
+model JobExecution {
+  id              String    @id @default(uuid())
+  
+  // Referência ao job no BullMQ (para correlação e auditoria)
+  bullmqJobId     String    @unique @map("bullmq_job_id")
+  
+  // Identificação e classificação
+  jobType         JobType   @map("job_type")
+  status          JobStatus @default(PENDING)
+  priority        Int       @default(0) // 0 = normal, maior = mais prioritário
+  
+  // Payload de entrada (o que foi solicitado)
+  inputPayload    Json      @map("input_payload")
+  
+  // Resultado do processamento (preenchido em COMPLETED)
+  outputPayload   Json?     @map("output_payload")
+  
+  // Controle de tentativas
+  attemptNumber   Int       @default(0) @map("attempt_number")
+  maxAttempts     Int       @default(3) @map("max_attempts")
+  
+  // Detalhes de falha (preenchido em FAILED, RETRYING ou DEAD)
+  errorMessage    String?   @map("error_message")
+  errorStack      String?   @map("error_stack")
+  
+  // Métricas de tempo (fundamentais para observabilidade)
+  enqueuedAt      DateTime  @default(now()) @map("enqueued_at")
+  startedAt       DateTime? @map("started_at")   // quando o worker iniciou
+  completedAt     DateTime? @map("completed_at") // quando terminou
+  processingMs    Int?      @map("processing_ms") // duração em ms
+  
+  // Qual instância de worker processou
+  workerInstanceId String?  @map("worker_instance_id")
+
+  // Relação oposta exigida pelo Prisma para a Dead Letter Queue
+  deadLetterEntry DeadLetterEntry?
+
+  @@index([status])
+  @@index([jobType])
+  @@index([enqueuedAt])
+  @@index([status, jobType])
+  
+  @@map("job_executions")
+}
+
+// Tabela de auditoria para a Dead Letter Queue
+model DeadLetterEntry {
+  id              String    @id @default(uuid())
+  jobExecutionId  String    @unique @map("job_execution_id")
+  bullmqJobId     String    @unique @map("bullmq_job_id")
+  jobType         JobType   @map("job_type")
+  inputPayload    Json      @map("input_payload")
+  
+  // Histórico completo de todas as falhas
+  failureHistory  Json      @map("failure_history")
+  
+  // Controle de resolução manual
+  resolvedAt      DateTime? @map("resolved_at")
+  resolvedBy      String?   @map("resolved_by")
+  resolutionNote  String?   @map("resolution_note")
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+  
+  // Relação com a execução original
+  jobExecution    JobExecution @relation(fields: [jobExecutionId], references: [id])
+  
+  @@index([resolvedAt])
+  @@index([jobType])
+  
+  @@map("dead_letter_entries")
+}
