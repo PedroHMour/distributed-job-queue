@@ -5,6 +5,8 @@ import { registerErrorHandler } from './plugins/error-handler.js';
 import { prisma } from './lib/prisma.js';
 import { closeQueues, getQueues } from './lib/queues.js';
 import { QUEUE_NAMES } from '@jobqueue/shared';
+import { apiKeyMiddleware } from './middleware/api-key.js';
+import { rateLimitMiddleware } from './middleware/rate-limit.js';
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 const HOST = '0.0.0.0';
@@ -19,10 +21,25 @@ async function bootstrap(): Promise<void> {
           : undefined,
     },
     genReqId: () => crypto.randomUUID(),
+    // Necessário para o rate limiter ler o IP real atrás de proxy/load balancer
+    trustProxy: true,
   });
 
   await fastify.register(sensible);
   registerErrorHandler(fastify);
+
+  // Middlewares globais — aplicados em todas as rotas exceto /health
+  fastify.addHook('onRequest', (request, reply, done) => {
+    // Health check não precisa de autenticação nem rate limit
+    if (request.url === '/health') return done();
+    rateLimitMiddleware(request, reply, done);
+  });
+
+  fastify.addHook('onRequest', (request, reply, done) => {
+    if (request.url === '/health') return done();
+    apiKeyMiddleware(request, reply, done);
+  });
+
   await fastify.register(jobsRoute, { prefix: '/api/v1' });
 
   fastify.get('/health', async (_request, reply) => {
